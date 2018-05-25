@@ -25,7 +25,6 @@ import (
 	"github.com/google/gapid/core/data/protoconv"
 	"github.com/google/gapid/core/log"
 	"github.com/google/gapid/core/memory/arena"
-	"github.com/google/gapid/gapis/api"
 	"github.com/google/gapid/gapis/memory"
 )
 
@@ -157,7 +156,7 @@ func TestCloneReferences(t *testing.T) {
 	ctx = arena.Put(ctx, a)
 	extra := CreateTestExtra(a)
 
-	cloned := extra.Clone(a, api.CloneContext{})
+	cloned := extra.Clone(a)
 	compare(ctx, cloned.Data(), extra.Data(), "Data")
 	compare(ctx, cloned.Object(), extra.Object(), "Object")
 	compare(ctx, cloned.ObjectArray(), extra.ObjectArray(), "ObjectArray")
