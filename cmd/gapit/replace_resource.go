@@ -93,32 +93,61 @@ func (verb *replaceResourceVerb) Run(ctx context.Context, flags flag.FlagSet) er
 		verb.At = int(boxedCapture.(*service.Capture).NumCommands) - 1
 	}
 
-	var resourcePath *path.Any
-	var resourceData interface{}
+	var resourcesPath *path.Any
+	var resourcesData interface{}
 
 	switch {
 	case verb.Handle != "":
-		matchedResource, err := resources.FindSingle(func(t api.ResourceType, r service.Resource) bool {
-			return t == api.ResourceType_ShaderResource && strings.Contains(r.GetHandle(), verb.Handle)
-		})
-		if err != nil {
-			return err
-		}
-		resourcePath = capture.Command(uint64(verb.At)).ResourceAfter(matchedResource.ID).Path()
-		oldResourceData, err := client.Get(ctx, resourcePath, nil)
-		if err != nil {
-			log.Errf(ctx, err, "Could not get data for shader: %v", matchedResource)
-			return err
-		}
-		shaderResourceData := oldResourceData.(*api.ResourceData).GetShader()
+		// Read replacement shader from disk.
 		newResourceBytes, err := ioutil.ReadFile(verb.ResourcePath)
 		if err != nil {
 			return log.Errf(ctx, err, "Could not read resource file %s", verb.ResourcePath)
 		}
-		resourceData = api.NewResourceData(&api.Shader{
-			Type:   shaderResourceData.GetType(),
-			Source: string(newResourceBytes),
+		// Find all shaders matching given handle.
+		shaderResources := resources.FindAll(func(t api.ResourceType, r service.Resource) bool {
+			return t == api.ResourceType_ShaderResource && strings.Contains(r.GetHandle(), verb.Handle)
 		})
+		if len(shaderResources) == 0 {
+			return log.Errf(ctx, err, "No shaders in trace match handle %s", verb.Handle)
+		}
+		log.I(ctx, "Found %d shaders that match handle %s", len(shaderResources), verb.Handle)
+		// For each shader, try to find it after the "At" command.
+		var ids []*path.ID
+		var resourcesSource []*api.ResourceData
+
+		for _, v := range shaderResources {
+
+			if uint64(verb.At) < v.Created.Indices[0] ||
+				(v.GetDeleted() != nil &&
+					v.GetDeleted().GetIndices() != nil &&
+					uint64(verb.At) >= v.GetDeleted().GetIndices()[0]) {
+				continue
+			}
+
+			log.I(ctx, "%v", v)
+
+			resourcePath := capture.Command(uint64(verb.At)).ResourceAfter(v.ID)
+			rd, err := client.Get(ctx, resourcePath.Path(), nil)
+			if err != nil {
+				log.I(ctx, "Could not get data for shader %v at index %d", v, verb.At)
+				continue
+			}
+
+			ids = append(ids, v.ID)
+			resourcesSource = append(
+				resourcesSource,
+				api.NewResourceData(&api.Shader{
+					Type:   rd.(*api.ResourceData).GetShader().GetType(),
+					Source: string(newResourceBytes),
+				}))
+
+		}
+		if len(ids) == 0 {
+			return log.Errf(ctx, err, "Could not get any matching shaders at index %d with handle %s", verb.At, verb.Handle)
+		}
+		resourcesData = api.NewMultiResourceData(resourcesSource)
+		resourcesPath = capture.Command(uint64(verb.At)).ResourcesAfter(ids).Path()
+		log.I(ctx, "Replacing %d things with %d things", len(ids), len(resourcesSource))
 	case verb.UpdateResourceBinary != "":
 		shaderResources := resources.FindAll(func(t api.ResourceType, r service.Resource) bool {
 			return t == api.ResourceType_ShaderResource
@@ -143,13 +172,14 @@ func (verb *replaceResourceVerb) Run(ctx context.Context, flags flag.FlagSet) er
 				Source: string(newData),
 			})
 		}
-		resourceData = api.NewMultiResourceData(resourcesSource)
-		resourcePath = capture.Command(uint64(verb.At)).ResourcesAfter(ids).Path()
+		resourcesData = api.NewMultiResourceData(resourcesSource)
+		resourcesPath = capture.Command(uint64(verb.At)).ResourcesAfter(ids).Path()
 	}
 
-	newResourcePath, err := client.Set(ctx, resourcePath, resourceData, nil)
+	log.I(ctx, "Replacing %v with %v", resourcesPath, resourcesData)
+	newResourcePath, err := client.Set(ctx, resourcesPath, resourcesData, nil)
 	if err != nil {
-		return log.Errf(ctx, err, "Could not update resource data: %v", resourcePath)
+		return log.Errf(ctx, err, "Could not update resource data: %v", resourcesPath)
 	}
 	newCapture := path.FindCapture(newResourcePath.Node())
 	newCaptureFilepath, err := filepath.Abs(verb.OutputTraceFile)

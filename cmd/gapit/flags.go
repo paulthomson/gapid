@@ -181,6 +181,7 @@ type (
 		Handle               string `help:"required. handle of the resource to replace"`
 		ResourcePath         string `help:"file path for the new resource"`
 		At                   int    `help:"command index to replace the resource(s) at"`
+		CreatedAt            int    `help:"command index where the resource was created, to disambiguate if needed"`
 		UpdateResourceBinary string `help:"shaders only. binary to run for every shader; consumes resource data from standard input and writes to standard output"`
 		OutputTraceFile      string `help:"file name for the updated trace"`
 	}
