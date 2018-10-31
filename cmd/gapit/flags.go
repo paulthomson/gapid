@@ -184,6 +184,7 @@ type (
 		At                   int    `help:"command index to replace the resource(s) at"`
 		UpdateResourceBinary string `help:"shaders only. binary to run for every shader; consumes resource data from standard input and writes to standard output"`
 		OutputTraceFile      string `help:"file name for the updated trace"`
+		SkipOutput           bool   `help:"skip writing the modified trace to a file"`
 	}
 	StateFlags struct {
 		Gapis  GapisFlags

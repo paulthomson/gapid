@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/google/gapid/core/app"
+	"github.com/google/gapid/core/data/id"
 	"github.com/google/gapid/core/log"
 	"github.com/google/gapid/core/os/shell"
 	"github.com/google/gapid/gapis/api"
@@ -63,9 +64,17 @@ func (verb *replaceResourceVerb) Run(ctx context.Context, flags flag.FlagSet) er
 		return nil
 	}
 
-	captureFilepath, err := filepath.Abs(flags.Arg(0))
+	captureFilepath := flags.Arg(0)
+
+	// Try parsing captureFilepath as a hex string.
+	captureId, err := id.Parse(captureFilepath)
+
 	if err != nil {
-		return log.Errf(ctx, err, "Could not find capture file '%s'", flags.Arg(0))
+		// captureFilepath really *is* a file path.
+		captureFilepath, err = filepath.Abs(flags.Arg(0))
+		if err != nil {
+			return log.Errf(ctx, err, "Could not find capture file '%s'", flags.Arg(0))
+		}
 	}
 
 	client, err := getGapis(ctx, verb.Gapis, verb.Gapir)
@@ -74,9 +83,14 @@ func (verb *replaceResourceVerb) Run(ctx context.Context, flags flag.FlagSet) er
 	}
 	defer client.Close()
 
-	capture, err := client.LoadCapture(ctx, captureFilepath)
-	if err != nil {
-		return log.Errf(ctx, err, "Failed to load the capture file '%v'", captureFilepath)
+	var capture *path.Capture
+	if captureId.IsValid() {
+		capture = &path.Capture{ID: path.NewID(captureId)}
+	} else {
+		capture, err = client.LoadCapture(ctx, captureFilepath)
+		if err != nil {
+			return log.Errf(ctx, err, "Failed to load the capture file '%v'", captureFilepath)
+		}
 	}
 
 	boxedResources, err := client.Get(ctx, capture.Resources().Path(), nil)
@@ -152,10 +166,19 @@ func (verb *replaceResourceVerb) Run(ctx context.Context, flags flag.FlagSet) er
 		return log.Errf(ctx, err, "Could not update resource data: %v", resourcePath)
 	}
 	newCapture := path.FindCapture(newResourcePath.Node())
-	newCaptureFilepath, err := filepath.Abs(verb.OutputTraceFile)
-	err = client.SaveCapture(ctx, newCapture, newCaptureFilepath)
+	log.I(ctx, "New capture id: %s", newCapture.ID)
 
-	log.I(ctx, "Capture written to: %v", newCaptureFilepath)
+	if verb.SkipOutput {
+		log.I(ctx, "Skipped writing new capture to file.")
+	} else {
+		newCaptureFilepath, err := filepath.Abs(verb.OutputTraceFile)
+		if err != nil {
+			return log.Errf(ctx, err, "Could not handle capture file path '%s'", newCaptureFilepath)
+		}
+		err = client.SaveCapture(ctx, newCapture, newCaptureFilepath)
+		log.I(ctx, "Capture written to: %v", newCaptureFilepath)
+	}
+
 	return nil
 }
 
