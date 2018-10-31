@@ -24,7 +24,6 @@ import (
 	"strings"
 
 	"github.com/google/gapid/core/app"
-	"github.com/google/gapid/core/data/id"
 	"github.com/google/gapid/core/log"
 	"github.com/google/gapid/core/os/shell"
 	"github.com/google/gapid/gapis/api"
@@ -64,34 +63,11 @@ func (verb *replaceResourceVerb) Run(ctx context.Context, flags flag.FlagSet) er
 		return nil
 	}
 
-	captureFilepath := flags.Arg(0)
-
-	// Try parsing captureFilepath as a hex string.
-	captureId, err := id.Parse(captureFilepath)
-
+	client, capture, err := getGapisAndLoadCapture(ctx, verb.Gapis, verb.Gapir, flags.Arg(0), verb.CaptureFileFlags)
 	if err != nil {
-		// captureFilepath really *is* a file path.
-		captureFilepath, err = filepath.Abs(flags.Arg(0))
-		if err != nil {
-			return log.Errf(ctx, err, "Could not find capture file '%s'", flags.Arg(0))
-		}
-	}
-
-	client, err := getGapis(ctx, verb.Gapis, verb.Gapir)
-	if err != nil {
-		return log.Err(ctx, err, "Failed to connect to the GAPIS server")
+		return err
 	}
 	defer client.Close()
-
-	var capture *path.Capture
-	if captureId.IsValid() {
-		capture = &path.Capture{ID: path.NewID(captureId)}
-	} else {
-		capture, err = client.LoadCapture(ctx, captureFilepath)
-		if err != nil {
-			return log.Errf(ctx, err, "Failed to load the capture file '%v'", captureFilepath)
-		}
-	}
 
 	boxedResources, err := client.Get(ctx, capture.Resources().Path(), nil)
 	if err != nil {
