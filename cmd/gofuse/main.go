@@ -43,10 +43,17 @@ import (
 
 // Map of bazel external package names to the expected import names.
 var externals = map[string]string{
-	"com_github_golang_protobuf": filepath.Join("github.com", "golang", "protobuf"),
-	"com_github_google_protobuf": filepath.Join("github.com", "google", "protobuf"),
-	"com_github_pkg_errors":      filepath.Join("github.com", "pkg", "errors"),
-	"llvm":                       "llvm",
+	"com_github_golang_protobuf":       filepath.Join("github.com", "golang", "protobuf"),
+	"com_github_google_protobuf":       filepath.Join("github.com", "google", "protobuf"),
+	"com_github_google_go_github":      filepath.Join("github.com", "google", "go-github"),
+	"com_github_google_go_querystring": filepath.Join("github.com", "google", "go-querystring"),
+	"com_github_grpc_grpc":             filepath.Join("github.com", "grpc", "grpc"),
+	"com_github_pkg_errors":            filepath.Join("github.com", "pkg", "errors"),
+	"org_golang_google_grpc":           filepath.Join("google.golang.org", "grpc"),
+	"org_golang_x_crypto":              filepath.Join("golang.org", "x", "crypto"),
+	"org_golang_x_net":                 filepath.Join("golang.org", "x", "net"),
+	"org_golang_x_tools":               filepath.Join("golang.org", "x", "tools"),
+	"llvm":                             "llvm",
 }
 
 var (
@@ -148,9 +155,26 @@ func run() error {
 	})
 
 	// Collect all the external package file mappings.
+
+	// E.g. /home/paulthomson/.cache/bazel/_bazel_paulthomson/1234/execroot/gapid/bazel-out
+	bazelOutResolved, err := filepath.EvalSymlinks(filepath.Join(projectRoot, "bazel-out"))
+	if err != nil {
+		return err
+	}
+	bazelOutResolved, err = filepath.Abs(bazelOutResolved)
+	if err != nil {
+		return err
+	}
+
+	// E.g. /home/paulthomson/.cache/bazel/_bazel_paulthomson/1234/
+	bazelCacheDir := filepath.Dir(filepath.Dir(filepath.Dir(bazelOutResolved)))
+
+	// E.g. /home/paulthomson/.cache/bazel/_bazel_paulthomson/1234/external
+	bazelExternals := filepath.Join(bazelCacheDir, "external")
+
 	extMapping := mappings{}
 	for pkg, imp := range externals {
-		src := filepath.Join(projectRoot, "bazel-gapid", "external", pkg)
+		src := filepath.Join(bazelExternals, pkg)
 		fmt.Println("Collecting .go files from:", src)
 		dst := filepath.Join(fusedRoot, "src", imp)
 		m := collect(src, always).ifTrue(and(isFile, hasSuffix(".go"))).
@@ -163,7 +187,7 @@ func run() error {
 	// Every mapping we're going to deal with.
 	allMappings := join(srcMapping, genfilesMappingOut, binMappingOut, extMapping)
 
-	// Remove all existing symlinks in the fused directory that part of the
+	// Remove all existing symlinks in the fused directory that are not part of the
 	// mappings. This may never happen if the OS automatically deletes deleted
 	// symlink targets.
 	if err := fusedFiles.ifFalse(allMappings.dsts().set().contains).foreach(remove); err != nil {
