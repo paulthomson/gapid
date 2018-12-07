@@ -14,21 +14,20 @@
 
 // gofuse is a utility program to help go tools work with bazel generated files.
 //
-// gofuse will create a new 'fused' directory in the project root which
-// contains:
-//  • Symlinks to authored .go (and optionally, .proto) source files in the GAPID source tree.
-//  • Symlinks to bazel-generated .go files (bazel-out/[config]/{bin,genfiles}).
+// gofuse will create a new 'fused' directory that contains:
+//  • Symlinks to files in the GAPID source tree.
+//  • Symlinks to bazel-generated files (bazel-out/[config]/{bin,genfiles}).
 //  • Symlinks to external 3rd-party .go files.
 // These symlinks are 'fused' into a single, common directory structure that
 // is expected by the typical GOPATH rules used by go tooling.
 //
 // Note: the extensive use of symlinks makes Windows support unlikely.
+// Note: the 'fused' directory should no longer reside within the GAPID source tree.
+// Note: do not use `bazel run` to execute gofuse, otherwise the external dependencies will
+// only include those needed for gofuse.
 //
-// Examples:
-//   bazel run //cmd/gofuse
-//   bazel run //cmd/gofuse -- --bazelout=k8-fastbuild
-//   bazel run //cmd/gofuse -- --bazelout=k8-dbg
-//   bazel run //cmd/gofuse -- --bazelout=darwin-fastbuild --linkproto=false
+// Example in main.
+//
 package main
 
 import (
@@ -37,7 +36,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -57,19 +55,23 @@ var externals = map[string]string{
 }
 
 var (
-	fuseDir = flag.String("dir", "", "directory to use as the fuse root")
-
-	bazelOutDirectory = flag.String("bazelout", "",
-		"The bazel-out/X directory name from which to include .go files. E.g. k8-fastbuild, darwin-fastbuild, k8-dbg, etc.")
-
-	linkProtoFiles = flag.Bool("linkproto", true,
-		"Whether to symlink .proto files. This is useful if you want to work in the fuse directory exclusively.")
+	fuseDir = flag.String("gopath", "", "directory to use as the fuse root")
 )
 
 func main() {
 	flag.Parse()
 
 	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, `
+Example:
+# build gofuse and other tools in one command (optionally in debug mode) so that external dependency directories are generated:
+bazel build -c dbg //:pkg //cmd/gofuse
+
+# Then run gofuse from GAPID repo root without using "bazel run", specifying an absolute path to a directory outside the GAPID source tree:
+bazel-bin/cmd/gofuse/linux_amd64_debug/gofuse -dir /gapid_gopath
+
+# Now set your GOPATH for your IDE to /gapid_gopath
+`)
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
@@ -77,74 +79,59 @@ func main() {
 
 func run() error {
 
-	if len(*bazelOutDirectory) == 0 {
-		switch runtime.GOOS {
-		case "linux":
-			*bazelOutDirectory = "k8-fastbuild"
-			break
-		case "darwin":
-			*bazelOutDirectory = "darwin-fastbuild"
-		default:
-		}
-
-		if len(*bazelOutDirectory) == 0 {
-			fmt.Println("\nFailed to guess bazel-out/X directory. Please pass --bazelout=X")
-			return fmt.Errorf("need bazelout flag")
-		}
-
-		fmt.Printf("\nWARNING: guessed bazel-out/X directory as: %s. Please pass --bazelout=X to be more explicit.\n", *bazelOutDirectory)
-		fmt.Println()
-	}
-
-	// If run via 'bazel run', use the workspace directory.
+	// If run via 'bazel run', fail
 	if cwd := os.Getenv("BUILD_WORKSPACE_DIRECTORY"); cwd != "" {
-		os.Chdir(cwd)
+		return fmt.Errorf("you must not run via `bazel run` (BUILD_WORKSPACE_DIRECTORY was set)")
 	}
 
-	// Locate the root of the GAPID project.
-	projectRoot, err := projectRoot()
+	if !isFile("WORKSPACE") {
+		return fmt.Errorf("expeted to find WORKSPACE file in current directory")
+	}
+
+	if !isSymlink("bazel-bin") {
+		return fmt.Errorf("expected to find bazel-bin symlink in current directory")
+	}
+
+	// Locate the root of the GAPID project (the current directory)
+	projectRoot, err := filepath.Abs("")
 	if err != nil {
 		return err
 	}
 
 	// fusedRoot is the root of the generated directory.
-	fusedRoot := filepath.Join(projectRoot, "fused")
-	if *fuseDir != "" {
-		fusedRoot = *fuseDir
+	if *fuseDir == "" || !filepath.IsAbs(*fuseDir) {
+		return fmt.Errorf("you must provide an absolute path to a fake GOPATH for use with go tools or your IDE. E.g. -gopath /gapid_gopath")
 	}
+
+	fusedRoot := *fuseDir
 
 	fmt.Println("Updating fused directory at:", fusedRoot)
 
 	// Collect all the existing symlinks under the fused root.
-	fusedFiles := collect(fusedRoot, always).ifTrue(and(or(hasSuffix(".go"), hasSuffix(".proto")), isFile, isSymlink))
+	fusedFiles := collect(fusedRoot, always).ifTrue(and(isFile, isSymlink))
 
-	fmt.Print("Collecting .go ")
-	if *linkProtoFiles {
-		fmt.Println("and .proto files from:", projectRoot)
-	} else {
-		fmt.Println("files from:", projectRoot)
-	}
+	fmt.Print("Collecting files from:", projectRoot)
 	srcMapping := collect(projectRoot,
 		and(
 			hasPrefix(fusedRoot).not(),                            // Don't traverse the fused root
 			hasPrefix(filepath.Join(projectRoot, "bazel-")).not(), // Don't traverse the bazel directories
+			hasPrefix(".").not(),                                  // Don't traverse . directories
 		)).
-		ifTrue(and(isFile, or(hasSuffix(".go"), and(fromBool(*linkProtoFiles), hasSuffix(".proto"))))). // Only consider .go and .proto files
+		ifTrue(isFile). // Only consider files
 		mapping(func(path string) string {
 			return filepath.Join(fusedRoot, "src", "github.com", "google", "gapid", rel(projectRoot, path))
 		})
 
-	// E.g. bazel-out/k8-dbg/genfiles
-	genfilesOut := filepath.Join(projectRoot, "bazel-out", *bazelOutDirectory, "genfiles")
-	fmt.Println("Collecting generated .go files from:", genfilesOut)
+	genfilesOut := filepath.Join(projectRoot, "bazel-genfiles")
+	fmt.Println("Collecting generated files from:", genfilesOut)
 	genfilesMappingOut := collect(genfilesOut, always).
-		ifTrue(and(isFile, hasSuffix(".go"))). // Only consider .go files
+		ifTrue(isFile). // Only consider files
 		mapping(func(path string) string {
 			return filepath.Join(fusedRoot, "src", "github.com", "google", "gapid", rel(genfilesOut, path))
 		})
 
-	// E.g. bazel-out/k8-dbg/bin
-	binOut := filepath.Join(projectRoot, "bazel-out", *bazelOutDirectory, "bin")
+	// This could be improved.
+	binOut := filepath.Join(projectRoot, "bazel-bin")
 	fmt.Println("Collecting generated .go files from:", binOut)
 	binMappingOut := collect(binOut, always).ifTrue(and(
 		isFile,
@@ -156,21 +143,7 @@ func run() error {
 
 	// Collect all the external package file mappings.
 
-	// E.g. /home/paulthomson/.cache/bazel/_bazel_paulthomson/1234/execroot/gapid/bazel-out
-	bazelOutResolved, err := filepath.EvalSymlinks(filepath.Join(projectRoot, "bazel-out"))
-	if err != nil {
-		return err
-	}
-	bazelOutResolved, err = filepath.Abs(bazelOutResolved)
-	if err != nil {
-		return err
-	}
-
-	// E.g. /home/paulthomson/.cache/bazel/_bazel_paulthomson/1234/
-	bazelCacheDir := filepath.Dir(filepath.Dir(filepath.Dir(bazelOutResolved)))
-
-	// E.g. /home/paulthomson/.cache/bazel/_bazel_paulthomson/1234/external
-	bazelExternals := filepath.Join(bazelCacheDir, "external")
+	bazelExternals := filepath.Join(projectRoot, "bazel-gapid", "external")
 
 	extMapping := mappings{}
 	for pkg, imp := range externals {
@@ -181,6 +154,7 @@ func run() error {
 			mapping(func(path string) string {
 				return filepath.Join(dst, rel(src, path))
 			})
+		fmt.Println("Here they are:", m)
 		extMapping = append(extMapping, m...)
 	}
 
@@ -445,22 +419,6 @@ func collect(root string, p pred) paths {
 		return nil
 	})
 	return out
-}
-
-// projectRoot searches upwards from the current working directory for the first
-// directory containing a file called 'WORKSPACE'.
-func projectRoot() (string, error) {
-	root, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("Could not get the current working directory: %v", err)
-	}
-	for isDir(root) {
-		if isFile(filepath.Join(root, "WORKSPACE")) {
-			return root, nil
-		}
-		root, _ = filepath.Split(root)
-	}
-	return "", fmt.Errorf("Couldn't find project root from CWD")
 }
 
 // isFile is a predicate that returns true if there is a file at path that is
