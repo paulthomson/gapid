@@ -662,6 +662,22 @@ std::string getCacheDir(struct android_app* app) {
 
 }  // namespace
 
+extern "C" JNIEXPORT JNICALL int Java_com_example_myapplication_MainActivity_android_1advance_1main(JNIEnv *) {
+  GAPID_LOGGER_INIT(LOG_LEVEL_VERBOSE, "gapir", "");
+  GAPID_INFO("HELLO!!!");
+
+  CrashHandler crashHandler;
+
+  std::string payloadPath = "/data/data/com.example.myapplication/cache/archive/payload.bin";
+  gapir::ArchiveReplayService replayArchiveService(payloadPath,
+                                                   "/data/data/com.example.myapplication/cache/postback");
+  // All the resource data must be in the archive file, no fallback resource
+  // loader to fetch uncached resources data.
+  auto onDiskCache = OnDiskResourceCache::create("/data/data/com.example.myapplication/cache/archive", false);
+  return replayArchive(&crashHandler, std::move(onDiskCache),
+                       &replayArchiveService);
+}
+
 // Main function for android
 void android_main(struct android_app* app) {
   // Start up in verbose mode until we have parsed any flags passed.
