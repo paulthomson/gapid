@@ -662,18 +662,32 @@ std::string getCacheDir(struct android_app* app) {
 
 }  // namespace
 
-extern "C" JNIEXPORT JNICALL int Java_com_example_myapplication_MainActivity_android_1advance_1main(JNIEnv *) {
+extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_playTrace(JNIEnv* env, jobject claz, jstring path_jstring, jstring postback_path_jstring) {
   GAPID_LOGGER_INIT(LOG_LEVEL_VERBOSE, "gapir", "");
   GAPID_INFO("HELLO!!!");
 
   CrashHandler crashHandler;
 
-  std::string payloadPath = "/data/data/com.example.myapplication/cache/archive/payload.bin";
-  gapir::ArchiveReplayService replayArchiveService(payloadPath,
-                                                   "/data/data/com.example.myapplication/cache/postback");
+  std::string path_string;
+  {
+    const char* path_cstr = env->GetStringUTFChars(path_jstring, nullptr);
+    path_string = path_cstr;
+    env->ReleaseStringUTFChars(path_jstring, path_cstr);
+  }
+
+  std::string postback_path_string;
+  {
+    const char* postback_path_cstr = env->GetStringUTFChars(postback_path_jstring, nullptr);
+    postback_path_string = postback_path_cstr;
+    env->ReleaseStringUTFChars(postback_path_jstring, postback_path_cstr);
+  }
+
+  std::string payload_path = path_string + "/payload.bin";
+  gapir::ArchiveReplayService replayArchiveService(payload_path,
+                                                   postback_path_string);
   // All the resource data must be in the archive file, no fallback resource
   // loader to fetch uncached resources data.
-  auto onDiskCache = OnDiskResourceCache::create("/data/data/com.example.myapplication/cache/archive", false);
+  auto onDiskCache = OnDiskResourceCache::create(path_string, false);
   return replayArchive(&crashHandler, std::move(onDiskCache),
                        &replayArchiveService);
 }
