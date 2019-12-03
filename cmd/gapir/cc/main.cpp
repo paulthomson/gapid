@@ -663,7 +663,7 @@ std::string getCacheDir(struct android_app* app) {
 }  // namespace
 
 extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_playTrace(JNIEnv* env, jobject claz, jstring path_jstring, jstring postback_path_jstring) {
-  GAPID_LOGGER_INIT(LOG_LEVEL_VERBOSE, "gapir", "");
+  GAPID_LOGGER_INIT(LOG_LEVEL_FATAL, "gapir", "");
   GAPID_INFO("HELLO!!!");
 
   CrashHandler crashHandler;
