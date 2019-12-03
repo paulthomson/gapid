@@ -53,6 +53,9 @@
 ¶
   namespace {«
 ¶
+  const bool kAdvanceSupportEnabled = true;
+
+  const char kAdvanceFpsLayerName[] = "VK_LAYER_ADVANCE_fps_counter";
   const char kVirtualSwapchainLayerName[] = "VirtualSwapchain";
   const char kGraphicsSpyLayerName[] = "GraphicsSpy";
   const char kValidationMetaLayerName[] = "VK_LAYER_LUNARG_standard_validation";
@@ -107,11 +110,14 @@ bool Vulkan::replayCreateVkInstanceImpl(Stack* stack,
                                           pCreateInfo->enabledExtensionCount);
   extensions.reserve(pCreateInfo->enabledExtensionCount + 1);
 
-  // Drop the GraphicsSpy and VirtualSwapchain layers, plus validation layers if requested.
+  // Drop the AdvanceFps, GraphicsSpy and VirtualSwapchain layers, plus validation layers if requested.
   layers.erase(
       std::remove_if(
           layers.begin(), layers.end(),
           [dropValidationLayersAndDebugReport](const char* layer) -> bool {
+            if (kAdvanceSupportEnabled && strcmp(kAdvanceFpsLayerName, layer) == 0) {
+              return true;
+            }
             if (strcmp(kGraphicsSpyLayerName, layer) == 0) {
               return true;
             }
@@ -131,6 +137,10 @@ bool Vulkan::replayCreateVkInstanceImpl(Stack* stack,
             return false;
           }),
       layers.end());
+  // Add AdvanceFps layer if ADVANCE support is enabled
+  if (kAdvanceSupportEnabled) {
+    layers.push_back(kAdvanceFpsLayerName);
+  }
   // Add VirtualSwapchain layer
   layers.push_back(kVirtualSwapchainLayerName);
   // Drop the debug report extension if requested.
