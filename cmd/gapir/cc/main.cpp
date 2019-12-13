@@ -666,7 +666,7 @@ extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_playTrace(JNIEnv*
   GAPID_LOGGER_INIT(LOG_LEVEL_FATAL, "gapir", "");
   GAPID_INFO("HELLO!!!");
 
-  CrashHandler crashHandler;
+  CrashHandler crashHandler("");
 
   std::string path_string;
   {
