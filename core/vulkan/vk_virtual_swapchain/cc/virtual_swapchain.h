@@ -49,7 +49,9 @@ class VirtualSwapchain {
                    bool always_get_acquired_image = false);
   // Call this to release all of the resources associated with this object.
   void Destroy(const VkAllocationCallbacks* pAllocator);
-  // Sets the function to be called when a frame has completed, along with
+  // Sets a global function to be called when a frame has completed.
+  static void SetGlobalCallback(void callback(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, VkFormat image_format));
+  // Sets a function to be called when a frame has completed, along with
   // a piece of user-data to be passed.
   void SetCallback(void callback(void*, uint8_t*, size_t), void*);
   // Returns in *image the index of the next free image. Returns false
@@ -196,9 +198,9 @@ class VirtualSwapchain {
                                                          // variable to wait on
                                                          // for free_images_ to
                                                          // contain an image.
-
-  void (*callback_)(void*, uint8_t*, size_t);  // The user-supplied callback.
-  void* callback_user_data_;  // The user-data to pass to this callback.
+  static void (*global_callback_)(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, VkFormat image_format);  // A user-supplied global callback.
+  void (*callback_)(void*, uint8_t*, size_t);  // A user-supplied per-instance callback.
+  void* callback_user_data_;  // The user-data to pass to these callbacks.
 
   const uint32_t queue_;  // the queue that we need to use to signal things
   const DeviceData* functions_;  // All of the resolved function pointers that
@@ -229,5 +231,9 @@ class VirtualSwapchain {
   void DumpImageToFile(uint8_t* image_data, size_t size);
 };
 }  // namespace swapchain
+
+extern "C" void virtual_swapchain_set_global_callback(void (*callback)(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format));
+
+extern "C" void virtual_swapchain_write_png(void(*stbi_write_func)(void*, void*, int), void* context, const uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format);
 
 #endif  //  VK_VIRTUAL_SWAPCHAIN_VIRTUAL_SWAPCHAIN_H_

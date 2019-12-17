@@ -54,6 +54,8 @@
 #include <sys/types.h>
 #endif  // TARGET_OS == GAPID_OS_ANDROID
 
+#include <dlfcn.h>
+
 using namespace core;
 using namespace gapir;
 
@@ -660,13 +662,64 @@ std::string getCacheDir(struct android_app* app) {
   return cache_dir_string;
 }
 
+uint32_t advance_frame_count;
+char* advance_output_data_pointer;
+uint32_t advance_output_data_size;
+
+void png_writer(void * context, void * data, int size) {
+  GAPID_INFO("In the PNG writer!");
+  // TODO: attend to deallocation
+  advance_output_data_pointer = new char[size];
+  memcpy(advance_output_data_pointer, data, size);
+  advance_output_data_size = size;
+}
+
+void virtualSwapchainGlobalCallback(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format) {
+  std::stringstream strstr;
+  strstr << "In the virtual swapchain callback!  Frame count is " << advance_frame_count;
+  GAPID_INFO(strstr.str().c_str());
+  if (advance_frame_count++ == 10) {
+    void* handle = dlopen("libVkLayer_VirtualSwapchain.so", RTLD_LOCAL | RTLD_LAZY);
+    if (!handle) {
+      GAPID_ERROR("Could not load virtual swapchain layer shared object file.");
+      GAPID_ERROR(dlerror());
+      return;
+    }
+    void(*virtual_swapchain_write_png)(void(*stbi_write_func)(void*, void*, int), void* context, const uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format);
+    virtual_swapchain_write_png = reinterpret_cast<void(*)(void(*)(void*, void*, int), void*, const uint8_t*, size_t, uint32_t, uint32_t, uint32_t)>(dlsym(handle, "virtual_swapchain_write_png"));
+    if (!virtual_swapchain_write_png) {
+      GAPID_ERROR("Failed to retrieve function 'virtual_swapchain_write_png'");
+      GAPID_ERROR(dlerror());
+      return;
+    }
+    GAPID_INFO("Requesting a PNG write");
+    (*virtual_swapchain_write_png)(&png_writer, nullptr, image_data, size, width, height, image_format);
+  }
+}
+
 }  // namespace
 
 extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_playTrace(JNIEnv* env, jobject claz, jstring path_jstring, jstring postback_path_jstring) {
-  GAPID_LOGGER_INIT(LOG_LEVEL_FATAL, "gapir", "");
+  GAPID_LOGGER_INIT(LOG_LEVEL_INFO, "gapir", "");
   GAPID_INFO("HELLO!!!");
 
-  CrashHandler crashHandler("");
+  advance_frame_count = 0;
+
+  void* handle = dlopen("libVkLayer_VirtualSwapchain.so", RTLD_LOCAL | RTLD_LAZY);
+  if (!handle) {
+    GAPID_ERROR("Could not load virtual swapchain layer shared object file.");
+    GAPID_ERROR(dlerror());
+    return 1;
+  }
+  void(*virtual_swapchain_set_global_callback)(void(*)(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format));
+  virtual_swapchain_set_global_callback = reinterpret_cast<void(*)(void(*)(uint8_t*, size_t, uint32_t, uint32_t, uint32_t))>(dlsym(handle, "virtual_swapchain_set_global_callback"));
+  if (!virtual_swapchain_set_global_callback) {
+    GAPID_ERROR("Failed to retrieve function 'virtual_swapchain_set_global_callback'");
+    GAPID_ERROR(dlerror());
+    return 1;
+  }
+
+  (*virtual_swapchain_set_global_callback)(&virtualSwapchainGlobalCallback);
 
   std::string path_string;
   {
@@ -682,6 +735,8 @@ extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_playTrace(JNIEnv*
     env->ReleaseStringUTFChars(postback_path_jstring, postback_path_cstr);
   }
 
+  CrashHandler crashHandler(postback_path_string + "/");
+
   std::string payload_path = path_string + "/payload.bin";
   gapir::ArchiveReplayService replayArchiveService(payload_path,
                                                    postback_path_string);
@@ -690,6 +745,17 @@ extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_playTrace(JNIEnv*
   auto onDiskCache = OnDiskResourceCache::create(path_string, false);
   return replayArchive(&crashHandler, std::move(onDiskCache),
                        &replayArchiveService);
+}
+
+extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_getImageDataSize(JNIEnv* env, jobject claz) {
+  return advance_output_data_size;
+}
+
+extern "C" JNIEXPORT JNICALL void Java_com_google_advance_Gapir_populateImageData(JNIEnv* env, jobject claz, jbyteArray bytes) {
+  jsize length = env->GetArrayLength(bytes);
+  assert (length == advance_output_data_size);
+  jbyte *data = env->GetByteArrayElements(bytes, 0);
+  memcpy(data, advance_output_data_pointer, length);
 }
 
 // Main function for android

@@ -395,6 +395,9 @@ void VirtualSwapchain::CopyThreadFunc() {
 
     uint32_t length = ImageByteSize();
     {
+      if (global_callback_) {
+        global_callback_((uint8_t*)mapped_value, length, width_, height_, swapchain_info_.imageFormat);
+      }
       callback_(callback_user_data_, (uint8_t*)mapped_value, length);
       if (image_dump_dir_ != "") {
         DumpImageToFile((uint8_t*)mapped_value, length);
@@ -454,6 +457,10 @@ void VirtualSwapchain::SetCallback(void callback(void*, uint8_t*, size_t),
   callback_user_data_ = user_data;
 }
 
+void VirtualSwapchain::SetGlobalCallback(void callback(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, VkFormat image_format)) {
+  global_callback_ = callback;
+}
+
 uint32_t VirtualSwapchain::ImageByteSize() const {
   // TODO(awoloszyn): Once we support more than RGBA8, have this be
   // more dynamic.
@@ -472,4 +479,42 @@ void VirtualSwapchain::CreateBaseSwapchain(
     base_swapchain_.reset();
   }
 }
+void (*VirtualSwapchain::global_callback_)(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, VkFormat image_format) = nullptr;
+
+extern "C" void virtual_swapchain_set_global_callback(void (*callback)(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format)) {
+  VirtualSwapchain::SetGlobalCallback(reinterpret_cast<void (*)(uint8_t*, size_t, uint32_t, uint32_t, VkFormat)>(callback));
+}
+
+extern "C" void virtual_swapchain_write_png(void(*stbi_write_func)(void*, void*, int), void* context, const uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format) {
+
+  VkFormat vk_image_format = static_cast<VkFormat>(image_format);
+  auto data = image_data;
+  switch (vk_image_format) {
+    case VK_FORMAT_B8G8R8A8_UNORM:
+    case VK_FORMAT_B8G8R8A8_UINT:
+      for (uint32_t y = 0; y < height; y++) {
+        uint32_t* row = (uint32_t*)data;
+        for (uint32_t x = 0; x < width; x++) {
+          uint8_t* bgra = (uint8_t*)row;
+          uint8_t b = *bgra;
+          *bgra = *(bgra + 2);
+          *(bgra + 2) = b;
+          row++;
+        }
+        data += width * 4;
+      }
+      // fall through
+
+    case VK_FORMAT_R8G8B8A8_UNORM:
+    case VK_FORMAT_R8G8B8A8_UINT:
+      data = image_data;
+      stbi_write_png_to_func(stbi_write_func, context, width, height, 4, data, width * 4);
+      break;
+
+    default:
+      break;
+  }
+
+}
+
 }  // namespace swapchain

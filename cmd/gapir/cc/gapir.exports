@@ -1,3 +1,5 @@
 ANativeActivity_onCreate
 android_main
 Java_com_google_advance_Gapir_playTrace
+Java_com_google_advance_Gapir_getImageDataSize
+Java_com_google_advance_Gapir_populateImageData
