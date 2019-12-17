@@ -662,37 +662,29 @@ std::string getCacheDir(struct android_app* app) {
   return cache_dir_string;
 }
 
-uint32_t advance_frame_count;
-char* advance_output_data_pointer;
-uint32_t advance_output_data_size;
+uint32_t ADVANCE_frame_count;
+char* ADVANCE_output_data_pointer;
+uint32_t ADVANCE_output_data_size;
+
+typedef void(*stbi_write_func_t)(void* context, void* data, int size);
+typedef void(*virtual_swapchain_write_png_t)(stbi_write_func_t, void* context, const uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format);
+typedef void(*virtual_swapchain_set_global_callback_t)(void(*)(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format));
+
+virtual_swapchain_write_png_t virtual_swapchain_write_png;
 
 void png_writer(void * context, void * data, int size) {
-  GAPID_INFO("In the PNG writer!");
-  // TODO: attend to deallocation
-  advance_output_data_pointer = new char[size];
-  memcpy(advance_output_data_pointer, data, size);
-  advance_output_data_size = size;
+  // TODO: attend to deallocation of this buffer.
+  ADVANCE_output_data_pointer = new char[size];
+  memcpy(ADVANCE_output_data_pointer, data, size);
+  ADVANCE_output_data_size = size;
 }
 
 void virtualSwapchainGlobalCallback(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format) {
   std::stringstream strstr;
-  strstr << "In the virtual swapchain callback!  Frame count is " << advance_frame_count;
+  strstr << "In the virtual swapchain callback.  Frame count is " << ADVANCE_frame_count;
   GAPID_INFO(strstr.str().c_str());
-  if (advance_frame_count++ == 10) {
-    void* handle = dlopen("libVkLayer_VirtualSwapchain.so", RTLD_LOCAL | RTLD_LAZY);
-    if (!handle) {
-      GAPID_ERROR("Could not load virtual swapchain layer shared object file.");
-      GAPID_ERROR(dlerror());
-      return;
-    }
-    void(*virtual_swapchain_write_png)(void(*stbi_write_func)(void*, void*, int), void* context, const uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format);
-    virtual_swapchain_write_png = reinterpret_cast<void(*)(void(*)(void*, void*, int), void*, const uint8_t*, size_t, uint32_t, uint32_t, uint32_t)>(dlsym(handle, "virtual_swapchain_write_png"));
-    if (!virtual_swapchain_write_png) {
-      GAPID_ERROR("Failed to retrieve function 'virtual_swapchain_write_png'");
-      GAPID_ERROR(dlerror());
-      return;
-    }
-    GAPID_INFO("Requesting a PNG write");
+  // TODO: 10 is just an example; we really want this to be the last frame of a trace.
+  if (ADVANCE_frame_count++ == 10) {
     (*virtual_swapchain_write_png)(&png_writer, nullptr, image_data, size, width, height, image_format);
   }
 }
@@ -703,7 +695,7 @@ extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_playTrace(JNIEnv*
   GAPID_LOGGER_INIT(LOG_LEVEL_INFO, "gapir", "");
   GAPID_INFO("HELLO!!!");
 
-  advance_frame_count = 0;
+  ADVANCE_frame_count = 0;
 
   void* handle = dlopen("libVkLayer_VirtualSwapchain.so", RTLD_LOCAL | RTLD_LAZY);
   if (!handle) {
@@ -711,10 +703,15 @@ extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_playTrace(JNIEnv*
     GAPID_ERROR(dlerror());
     return 1;
   }
-  void(*virtual_swapchain_set_global_callback)(void(*)(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format));
-  virtual_swapchain_set_global_callback = reinterpret_cast<void(*)(void(*)(uint8_t*, size_t, uint32_t, uint32_t, uint32_t))>(dlsym(handle, "virtual_swapchain_set_global_callback"));
+  virtual_swapchain_set_global_callback_t virtual_swapchain_set_global_callback = reinterpret_cast<virtual_swapchain_set_global_callback_t>(dlsym(handle, "virtual_swapchain_set_global_callback"));
   if (!virtual_swapchain_set_global_callback) {
     GAPID_ERROR("Failed to retrieve function 'virtual_swapchain_set_global_callback'");
+    GAPID_ERROR(dlerror());
+    return 1;
+  }
+  virtual_swapchain_write_png = reinterpret_cast<virtual_swapchain_write_png_t>(dlsym(handle, "virtual_swapchain_write_png"));
+  if (!virtual_swapchain_write_png) {
+    GAPID_ERROR("Failed to retrieve function 'virtual_swapchain_write_png'");
     GAPID_ERROR(dlerror());
     return 1;
   }
@@ -748,14 +745,14 @@ extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_playTrace(JNIEnv*
 }
 
 extern "C" JNIEXPORT JNICALL int Java_com_google_advance_Gapir_getImageDataSize(JNIEnv* env, jobject claz) {
-  return advance_output_data_size;
+  return ADVANCE_output_data_size;
 }
 
 extern "C" JNIEXPORT JNICALL void Java_com_google_advance_Gapir_populateImageData(JNIEnv* env, jobject claz, jbyteArray bytes) {
   jsize length = env->GetArrayLength(bytes);
-  assert (length == advance_output_data_size);
+  assert (length == ADVANCE_output_data_size);
   jbyte *data = env->GetByteArrayElements(bytes, 0);
-  memcpy(data, advance_output_data_pointer, length);
+  memcpy(data, ADVANCE_output_data_pointer, length);
 }
 
 // Main function for android
