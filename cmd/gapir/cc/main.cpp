@@ -667,13 +667,16 @@ char* ADVANCE_output_data_pointer;
 uint32_t ADVANCE_output_data_size;
 
 typedef void(*stbi_write_func_t)(void* context, void* data, int size);
-typedef void(*virtual_swapchain_write_png_t)(stbi_write_func_t, void* context, const uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format);
+typedef void(*virtual_swapchain_write_png_t)(stbi_write_func_t, void* context, uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format);
 typedef void(*virtual_swapchain_set_global_callback_t)(void(*)(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format));
 
 virtual_swapchain_write_png_t virtual_swapchain_write_png;
 
-void png_writer(void * context, void * data, int size) {
-  // TODO: attend to deallocation of this buffer.
+void advanceCapturePng(void * context, void * data, int size) {
+  assert(!ADVANCE_output_data_pointer);
+  assert(ADVANCE_output_data_size == 0);
+  // Deallocation occurs in native method
+  // com.google.advance.Gapir::populateImageData
   ADVANCE_output_data_pointer = new char[size];
   memcpy(ADVANCE_output_data_pointer, data, size);
   ADVANCE_output_data_size = size;
@@ -685,7 +688,7 @@ void virtualSwapchainGlobalCallback(uint8_t* image_data, size_t size, uint32_t w
   GAPID_INFO(strstr.str().c_str());
   // TODO: 10 is just an example; we really want this to be the last frame of a trace.
   if (ADVANCE_frame_count++ == 10) {
-    (*virtual_swapchain_write_png)(&png_writer, nullptr, image_data, size, width, height, image_format);
+    (*virtual_swapchain_write_png)(&advanceCapturePng, nullptr, image_data, size, width, height, image_format);
   }
 }
 
@@ -753,6 +756,10 @@ extern "C" JNIEXPORT JNICALL void Java_com_google_advance_Gapir_populateImageDat
   assert (length == ADVANCE_output_data_size);
   jbyte *data = env->GetByteArrayElements(bytes, 0);
   memcpy(data, ADVANCE_output_data_pointer, length);
+  // Deallocation of buffer allocated in advanceCapturePng
+  delete ADVANCE_output_data_pointer;
+  ADVANCE_output_data_pointer = nullptr;
+  ADVANCE_output_data_size = 0;
 }
 
 // Main function for android

@@ -234,6 +234,6 @@ class VirtualSwapchain {
 
 extern "C" void virtual_swapchain_set_global_callback(void (*callback)(uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format));
 
-extern "C" void virtual_swapchain_write_png(void(*stbi_write_func)(void*, void*, int), void* context, const uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format);
+extern "C" void virtual_swapchain_write_png(void(*func)(void* context, void* data, int size), void* context, uint8_t* image_data, size_t size, uint32_t width, uint32_t height, uint32_t image_format);
 
 #endif  //  VK_VIRTUAL_SWAPCHAIN_VIRTUAL_SWAPCHAIN_H_
